@@ -1,0 +1,15 @@
+services:
+  pm:
+    build:
+      context: ..
+      dockerfile: Dockerfile
+    image: iteration-hub-pm:latest
+    container_name: pm
+    restart: unless-stopped
+    ports:
+      - "${PM_PORT:-8787}:8787"
+    environment:
+      PM_TOKEN: "${PM_TOKEN:?set PM_TOKEN in deploy/.env}"
+    volumes:
+      # iteration-hub 是服务仓；这里挂载的是你的 roadmap 数据仓（my-roadmap）
+      - "${ROADMAP:?set ROADMAP in deploy/.env}:/data"

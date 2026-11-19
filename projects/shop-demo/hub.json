@@ -1,0 +1,51 @@
+{
+  "name": "shop-demo",
+  "current_iteration": "2026-11",
+  "iterations": [
+    {
+      "id": "2026-11",
+      "title": "11 月迭代",
+      "start": "2026-11-02",
+      "end": "2026-11-29",
+      "goal": "商品列表 + 购物车"
+    },
+    {
+      "id": "backlog",
+      "title": "需求池",
+      "start": null,
+      "end": null,
+      "goal": ""
+    }
+  ],
+  "lanes": [
+    "backend",
+    "web"
+  ],
+  "lane_labels": {
+    "backend": "后端",
+    "web": "Web"
+  },
+  "lane_short": {
+    "backend": "后",
+    "web": "Web"
+  },
+  "lane_colors": {
+    "backend": "#34d399",
+    "web": "#38bdf8"
+  },
+  "lane_order": [
+    "backend",
+    "web"
+  ],
+  "repos": {
+    "api": {
+      "name": "shop-api",
+      "role": "后端 + Web"
+    }
+  },
+  "risk_lag_days": 7,
+  "stale_days": 5,
+  "tokens_path": "design/tokens.json",
+  "screens_dir": "spec/screens",
+  "shots_dir": "shots"
+}

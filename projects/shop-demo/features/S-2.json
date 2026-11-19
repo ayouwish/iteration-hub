@@ -1,0 +1,42 @@
+{
+  "id": "S-2",
+  "title": "购物车合并",
+  "iteration": "2026-11",
+  "priority": "P2",
+  "area": "cart",
+  "spec": "spec/cart.md",
+  "acceptance": [],
+  "contract": {
+    "version": null,
+    "frozen": false,
+    "doc": null
+  },
+  "revision": "r1",
+  "revisions": [
+    {
+      "rev": "r1",
+      "at": "2026-11-09",
+      "breaking": false,
+      "note": "初版",
+      "contract": null
+    }
+  ],
+  "plan": {
+    "doc": "spec/cart.md",
+    "approved": true,
+    "at": "2026-11-09"
+  },
+  "platforms": {
+    "backend": {
+      "status": "todo",
+      "owner": "me"
+    },
+    "web": {
+      "status": "todo",
+      "owner": "me"
+    }
+  },
+  "tags": [],
+  "created_at": "2026-11-09T02:00:00Z",
+  "project": "shop-demo"
+}

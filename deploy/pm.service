@@ -1,0 +1,13 @@
+[Unit]
+Description=pm roadmap service
+After=network.target
+
+[Service]
+WorkingDirectory=/opt/iteration-hub
+Environment=PM_TOKEN=change-me-to-a-long-random-string
+ExecStart=/usr/bin/python3 pm.py --roadmap /srv/my-roadmap serve --host 0.0.0.0 --port 8787
+Restart=always
+RestartSec=3
+
+[Install]
+WantedBy=multi-user.target

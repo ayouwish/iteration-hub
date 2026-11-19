@@ -1,0 +1,33 @@
+{
+  "name": "ayouwish-workspace",
+  "machines": {
+    "windows-home": {
+      "label": "家用 Windows（日常）",
+      "writable": true
+    },
+    "mac-weekend": {
+      "label": "Mac（周末）",
+      "writable": true
+    },
+    "cloud": {
+      "label": "云服务器（只读聚合）",
+      "writable": false
+    }
+  },
+  "people": {
+    "me": {
+      "name": "我"
+    },
+    "ai-1": {
+      "name": "AI Agent 1"
+    }
+  },
+  "machine_aliases": {},
+  "projects": {
+    "shop-demo": {
+      "name": "商城 Demo",
+      "path": "projects/shop-demo"
+    }
+  },
+  "default_project": "shop-demo"
+}
