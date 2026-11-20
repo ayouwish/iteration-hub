@@ -3455,6 +3455,31 @@ class HubHandler(BaseHTTPRequestHandler):
         from urllib.parse import parse_qs, urlparse
         return self.token in (parse_qs(urlparse(self.path).query).get("token") or [])
 
+    def _project_add(self, body):
+        pid = str(body.get("id") or "").strip()
+        if not pid:
+            return {"ok": False, "error": "id 必填"}
+        argv = [sys.executable, str(Path(__file__).resolve()),
+                "--roadmap", str(HUB_ROOT), "project", "add", "--id", pid]
+        if body.get("name"):
+            argv += ["--name", str(body["name"])]
+        if body.get("lanes"):
+            argv += ["--lanes", str(body["lanes"])]
+        if body.get("repos"):
+            argv += ["--repos", str(body["repos"])]
+        if body.get("iteration"):
+            argv += ["--iteration", str(body["iteration"])]
+        if body.get("from"):
+            argv += ["--from", str(body["from"])]
+        if body.get("default"):
+            argv.append("--default")
+        r = subprocess.run(argv, capture_output=True, text=True, timeout=120)
+        out = (r.stdout or "").strip()
+        err = (r.stderr or "").strip()
+        if r.returncode != 0:
+            return {"ok": False, "error": (err or out or "project add failed")[:1000]}
+        return {"ok": True, "output": out}
+
     def _claim(self, cfg, body):
         state = fold(cfg, load_features(), read_events())
         sess = str(body.get("session") or "remote")
@@ -3540,13 +3565,15 @@ class HubHandler(BaseHTTPRequestHandler):
             return self._json(403, {"ok": False, "error": "只读模式：不开放写入"})
         try:
             n = int(self.headers.get("Content-Length") or 0)
-            body = json.loads(self.rfile.read(n).decode("utf-8") or "{}")
+            body = json.loads(self.rfile.read(n).decode("utf-8-sig") or "{}")
         except Exception as e:
             return self._json(400, {"ok": False, "error": f"请求解析失败: {e}"})
         try:
             with self.lock:
                 if path == "/api/sync":
                     result = sync_hub()
+                elif path == "/api/project/add":
+                    result = self._project_add(body)
                 elif path == "/api/build":
                     build_all(quiet=True)
                     result = {"ok": True, "message": "built"}

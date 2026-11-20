@@ -1,5 +1,7 @@
 FROM python:3.12-alpine
 
+RUN apk add --no-cache git openssh-client ca-certificates
+
 WORKDIR /app
 
 COPY pm.py /app/pm.py
