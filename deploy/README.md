@@ -43,6 +43,8 @@ ROADMAP=/volume1/docker/my-roadmap
 PM_SSH_DIR=/volume1/docker/pm-ssh
 PUID=1000
 PGID=1000
+GIT_NAME=drinkwish
+GIT_EMAIL=drinkwish@example.com
 ```
 
 `ROADMAP` 必须指向 **my-roadmap**，不是 iteration-hub。

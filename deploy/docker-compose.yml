@@ -13,6 +13,10 @@ services:
     environment:
       PM_TOKEN: "${PM_TOKEN:?set PM_TOKEN in deploy/.env}"
       GIT_SSH_COMMAND: "ssh -i /ssh/id_ed25519 -o UserKnownHostsFile=/ssh/known_hosts -o StrictHostKeyChecking=yes -o IdentitiesOnly=yes"
+      GIT_AUTHOR_NAME: "${GIT_NAME:-pm}"
+      GIT_AUTHOR_EMAIL: "${GIT_EMAIL:-pm@localhost}"
+      GIT_COMMITTER_NAME: "${GIT_NAME:-pm}"
+      GIT_COMMITTER_EMAIL: "${GIT_EMAIL:-pm@localhost}"
       HOME: /tmp
     volumes:
       # iteration-hub 是服务仓；这里挂载的是你的 roadmap 数据仓
