@@ -10,6 +10,7 @@ services:
       - "${PM_PORT:-8787}:8787"
     environment:
       PM_TOKEN: "${PM_TOKEN:?set PM_TOKEN in deploy/.env}"
+      GIT_SSH_COMMAND: "ssh -i /root/.ssh/id_ed25519 -o UserKnownHostsFile=/root/.ssh/known_hosts -o StrictHostKeyChecking=yes -o IdentitiesOnly=yes"
     volumes:
       # iteration-hub 是服务仓；这里挂载的是你的 roadmap 数据仓
       - "${ROADMAP:?set ROADMAP in deploy/.env}:/data"
