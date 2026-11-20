@@ -41,12 +41,14 @@ PM_TOKEN=<长随机串，例如 openssl rand -hex 24>
 PM_PORT=8787
 ROADMAP=/volume1/docker/my-roadmap
 PM_SSH_DIR=/volume1/docker/pm-ssh
+PUID=1000
+PGID=1000
 ```
 
 `ROADMAP` 必须指向 **my-roadmap**，不是 iteration-hub。
 
 `PM_SSH_DIR` 是 NAS 上存放 **pm-wish 的 deploy key** 的目录，会只读挂载到容器的
-`/root/.ssh`。里面至少要有：
+`/ssh`。里面至少要有：
 
 ```
 id_ed25519       # 私钥，chmod 600
@@ -63,7 +65,13 @@ chmod 600 /volume1/docker/pm-ssh/id_ed25519
 ```
 
 把 `id_ed25519.pub` 加到 GitHub → pm-wish 仓库 → **Settings → Deploy keys**，
-勾选 **Allow write access**。验证：
+勾选 **Allow write access**。
+
+容器用 `PUID`/`PGID` 运行（`id -u` / `id -g` 得到），这样 `/data` 里的文件归 NAS 用户所有，
+不会出现 root 所有或 Git “dubious ownership”。`PM_SSH_DIR` 目录权限建议 700，私钥 600，
+属主是 `PUID` 对应用户。
+
+验证：
 
 ```bash
 docker compose exec pm ssh -T git@github.com
