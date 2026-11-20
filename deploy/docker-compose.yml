@@ -11,5 +11,7 @@ services:
     environment:
       PM_TOKEN: "${PM_TOKEN:?set PM_TOKEN in deploy/.env}"
     volumes:
-      # iteration-hub 是服务仓；这里挂载的是你的 roadmap 数据仓（my-roadmap）
+      # iteration-hub 是服务仓；这里挂载的是你的 roadmap 数据仓
       - "${ROADMAP:?set ROADMAP in deploy/.env}:/data"
+      # pm-wish 的 deploy key 目录（含 id_ed25519 + known_hosts），只读挂载
+      - "${PM_SSH_DIR:?set PM_SSH_DIR in deploy/.env}:/root/.ssh:ro"

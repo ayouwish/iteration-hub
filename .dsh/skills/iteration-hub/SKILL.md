@@ -33,6 +33,7 @@ iteration-hub（服务代码）                 dsh-pm 插件
 | `LANES` | `backend,web,ios,android,hos` | 按实际端删减 |
 | `REPOS` | 可空 | 子项目代码仓：`name:仓库名:角色`，只登记不拉代码 |
 | `PLUGIN_SOURCE` | 本地路径 | dsh-pm 插件来源：本地目录 / npm 包名 / Git 地址 |
+| `PM_SSH_DIR` | 必填（用 git 时） | NAS 上的 deploy key 目录（id_ed25519 + known_hosts） |
 
 生成 token：
 
@@ -118,6 +119,7 @@ cp .env.example .env
 PM_TOKEN=<长随机串>
 PM_PORT=8787
 ROADMAP=/volume1/docker/my-roadmap
+PM_SSH_DIR=/volume1/docker/pm-ssh
 ```
 
 `ROADMAP` 必须指向 my-roadmap，不能指向 iteration-hub。

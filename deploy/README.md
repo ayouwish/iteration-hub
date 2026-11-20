@@ -40,9 +40,35 @@ cp .env.example .env
 PM_TOKEN=<长随机串，例如 openssl rand -hex 24>
 PM_PORT=8787
 ROADMAP=/volume1/docker/my-roadmap
+PM_SSH_DIR=/volume1/docker/pm-ssh
 ```
 
 `ROADMAP` 必须指向 **my-roadmap**，不是 iteration-hub。
+
+`PM_SSH_DIR` 是 NAS 上存放 **pm-wish 的 deploy key** 的目录，会只读挂载到容器的
+`/root/.ssh`。里面至少要有：
+
+```
+id_ed25519       # 私钥，chmod 600
+known_hosts      # ssh-keyscan github.com > known_hosts
+```
+
+生成并添加 deploy key：
+
+```bash
+mkdir -p /volume1/docker/pm-ssh && chmod 700 /volume1/docker/pm-ssh
+ssh-keygen -t ed25519 -f /volume1/docker/pm-ssh/id_ed25519 -N ''
+ssh-keyscan github.com > /volume1/docker/pm-ssh/known_hosts
+chmod 600 /volume1/docker/pm-ssh/id_ed25519
+```
+
+把 `id_ed25519.pub` 加到 GitHub → pm-wish 仓库 → **Settings → Deploy keys**，
+勾选 **Allow write access**。验证：
+
+```bash
+docker compose exec pm ssh -T git@github.com
+docker compose exec pm git -C /data ls-remote origin
+```
 
 ## 3. 初始化 roadmap 并添加项目
 
