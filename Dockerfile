@@ -6,6 +6,7 @@ RUN git config --system --add safe.directory /data
 WORKDIR /app
 
 COPY pm.py /app/pm.py
+RUN chmod 755 /app && chmod 644 /app/pm.py
 
 ENV PM_TOKEN=change-me
 EXPOSE 8787
