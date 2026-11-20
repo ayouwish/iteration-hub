@@ -2014,6 +2014,67 @@ def ensure_hub() -> dict:
     return init_roadmap(quiet=True)
 
 
+def _new_hub() -> dict:
+    return {
+        "name": HUB_ROOT.name or "workspace",
+        "machines": {m: {"label": l, "writable": w} for m, l, w in DEFAULT_MACHINES},
+        "people": {"me": {"name": "我"}},
+        "machine_aliases": {},
+        "projects": {},
+        "default_project": None,
+    }
+
+
+def project_add(a):
+    HUB_ROOT.mkdir(parents=True, exist_ok=True)
+    fresh = not (HUB_ROOT / "hub.json").exists()
+    hub = _new_hub() if fresh else load_hub()
+    pid = sanitize(a.id)
+    if pid in hub["projects"]:
+        die(f"项目已存在: {pid}")
+    dst = HUB_ROOT / "projects" / pid
+    if dst.exists():
+        die(f"目录已存在: {dst}（先移走或换一个 --id）")
+    name = a.name or pid
+    if a.from_dir:
+        src_dir = Path(a.from_dir).expanduser().resolve()
+        if not src_dir.is_dir():
+            die(f"不是目录: {src_dir}")
+        shutil.copytree(src_dir, dst)
+        if not (dst / "hub.json").exists():
+            pcfg = make_cfg(name, list(PRESETS["multi"]["platforms"]),
+                            hub.get("machines", {}), {}, a.iteration)
+            write_hub_files(dst, pcfg)
+    else:
+        lanes = parse_platforms(a.lanes) if a.lanes else list(PRESETS["multi"]["platforms"])
+        repos = parse_repos(a.repos) if a.repos else {}
+        pcfg = make_cfg(name, lanes, hub.get("machines", {}), repos, a.iteration)
+        write_hub_files(dst, pcfg)
+    hub["projects"][pid] = {"name": name, "path": f"projects/{pid}"}
+    if a.default or not hub.get("default_project"):
+        hub["default_project"] = pid
+    (HUB_ROOT / "hub.json").write_text(
+        json.dumps(hub, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    if fresh:
+        write_root_files(HUB_ROOT, hub)
+    use_project(pid)
+    print(f"已添加项目: {pid}（{name}）")
+    print(f"  泳道: {' / '.join(load_cfg()['platforms'])}")
+    print(f"  默认项目: {hub['default_project']}")
+    if a.from_dir:
+        print(f"  已导入: {a.from_dir}")
+
+
+def cmd_project(a):
+    if a.action == "list":
+        hub = load_hub()
+        for pid, meta in hub["projects"].items():
+            mark = " *" if pid == hub.get("default_project") else ""
+            print(f"{pid:<20}{meta.get('name', pid)}{mark}")
+        return
+    project_add(a)
+
+
 def cmd_init(a):
     if (HUB_ROOT / "hub.json").exists():
         print("hub.json 已存在，跳过（要重建请先删除）")
@@ -3803,6 +3864,20 @@ def main(argv=None):
     p = sub.add_parser("projects", help="列出所有项目")
     p.set_defaults(func=cmd_projects)
 
+    p = sub.add_parser("project", help="项目管理：add / list")
+    sp = p.add_subparsers(dest="action", required=True)
+    pa = sp.add_parser("add", help="新增项目（roadmap 为空时自动建 hub）")
+    pa.add_argument("--id", required=True)
+    pa.add_argument("--name")
+    pa.add_argument("--lanes", help="逗号分隔，如 backend,web,ios,android,hos")
+    pa.add_argument("--repos", help="name:仓库名:角色，逗号分隔")
+    pa.add_argument("--iteration")
+    pa.add_argument("--from", dest="from_dir", help="导入已有项目目录（如备份）")
+    pa.add_argument("--default", action="store_true")
+    pa.set_defaults(func=cmd_project)
+    pl = sp.add_parser("list", help="列出项目")
+    pl.set_defaults(func=cmd_project)
+
     a = ap.parse_args(argv)
     cmd = a.cmd
     url = None if os.environ.get("PM_LOCAL") else resolve_server()
@@ -3811,7 +3886,7 @@ def main(argv=None):
         return
     global_cmds = {"scaffold", "init", "setup", "machine", "bind", "projects",
                    "serve", "sync", "build", "list", "check", "doctor", "gen", "shots",
-                   "connect", "roadmap"}
+                   "connect", "roadmap", "project"}
     hub = None
     if cmd not in global_cmds:
         hub = load_hub()

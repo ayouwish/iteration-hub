@@ -61,33 +61,47 @@ git clone <your-roadmap-repo>
 > iteration-hub 自带的 `projects/my-project`、`shop-demo` 只是示例；
 > 生产数据放 my-roadmap，不要把两者混在一起。
 
-## 2. 初始化 roadmap（my-roadmap）
+## 2. 初始化 roadmap 并添加项目
 
-空目录（或只有 `.git`）可以自动初始化；非空目录会拒绝，避免误建。
-
-```bash
-python3 pm.py --roadmap ../my-roadmap init --name my-roadmap
-```
-
-如果 NAS 上没有 Python，用一次性容器（先配置好 `deploy/.env` 的 `ROADMAP`）：
+`project add` 会在 roadmap 为空时自动建 `hub.json`，已存在时只新增项目。
+在 NAS 上（或通过一次性容器）：
 
 ```bash
 cd deploy
-docker compose run --rm pm python pm.py --roadmap /data init --name my-roadmap
+docker compose run --rm pm python pm.py --roadmap /data project add \
+  --id <PROJECT_ID> --name "<PROJECT_NAME>" \
+  --lanes backend,web,ios,android,hos \
+  --repos "server:<server-repo>:后端+Web,clients:<app-repo>:iOS/Android/鸿蒙" \
+  --default
 ```
 
-初始化后检查：
+如果已有项目备份，先放到 roadmap 卷里（例如 `/volume1/docker/my-roadmap/import/<project>`），
+再导入：
 
 ```bash
-python3 pm.py --roadmap ../my-roadmap projects
+docker compose run --rm pm python pm.py --roadmap /data project add \
+  --id <PROJECT_ID> --name "<PROJECT_NAME>" \
+  --from /data/import/<project> --default
 ```
 
-编辑 `my-roadmap/projects/<pid>/hub.json`：
+检查：
+
+```bash
+docker compose run --rm pm python pm.py --roadmap /data projects
+```
+
+然后编辑 `projects/<PROJECT_ID>/hub.json`：
 
 - `lanes`：后端 / Web / iOS / Android / 鸿蒙，删掉不做的；
 - `iterations`：当前迭代和 backlog；
 - `repos`：子项目代码仓（只登记，不拉代码）；
 - `people`：负责人。
+
+重启服务让面板加载新项目：
+
+```bash
+docker compose restart pm
+```
 
 ## 3. 部署 pm 服务到 NAS
 

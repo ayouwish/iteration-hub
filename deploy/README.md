@@ -44,17 +44,30 @@ ROADMAP=/volume1/docker/my-roadmap
 
 `ROADMAP` 必须指向 **my-roadmap**，不是 iteration-hub。
 
-## 3. 首次初始化（可选）
+## 3. 初始化 roadmap 并添加项目
 
-容器首次启动时如果 roadmap 为空，会自动初始化，项目 id 取目录名（如 `my-roadmap`）。
-想指定项目 id/名称，先用一次性容器初始化：
+`project add` 会在 roadmap 为空时自动建 hub，已存在时只加项目：
 
 ```bash
-docker compose run --rm pm \
-  python pm.py --roadmap /data init --name my-roadmap
+docker compose run --rm pm python pm.py --roadmap /data project add \
+  --id <PROJECT_ID> --name "<PROJECT_NAME>" \
+  --lanes backend,web,ios,android,hos \
+  --default
 ```
 
-然后把 `my-roadmap/projects/<pid>/hub.json` 改成实际项目（lanes / iterations / repos）。
+已有项目备份时，把备份放到 roadmap 卷的 `import/` 下再导入：
+
+```bash
+docker compose run --rm pm python pm.py --roadmap /data project add \
+  --id <PROJECT_ID> --name "<PROJECT_NAME>" \
+  --from /data/import/<project> --default
+```
+
+检查：
+
+```bash
+docker compose run --rm pm python pm.py --roadmap /data projects
+```
 
 ## 4. 启动
 

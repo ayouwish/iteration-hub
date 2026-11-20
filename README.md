@@ -75,6 +75,8 @@ docker compose up -d --build
 ## 手工 CLI
 
 ```bash
+python3 pm.py --roadmap /path/to/my-roadmap project add \
+  --id <project> --name "<name>" --lanes backend,web,ios,android,hos --default
 python3 pm.py --roadmap /path/to/my-roadmap projects
 python3 pm.py --roadmap /path/to/my-roadmap serve --host 0.0.0.0 --port 8787 --token <token>
 ```
