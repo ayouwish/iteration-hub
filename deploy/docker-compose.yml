@@ -12,6 +12,8 @@ services:
     # 这样 /data 文件归 NAS 用户，ssh 也能查到 uid 对应的用户
     environment:
       PM_TOKEN: "${PM_TOKEN:?set PM_TOKEN in deploy/.env}"
+      PUID: "${PUID:-0}"
+      PGID: "${PGID:-0}"
       GIT_SSH_COMMAND: "ssh -i /ssh/id_ed25519 -o UserKnownHostsFile=/ssh/known_hosts -o StrictHostKeyChecking=yes -o IdentitiesOnly=yes"
       GIT_AUTHOR_NAME: "${GIT_NAME:-pm}"
       GIT_AUTHOR_EMAIL: "${GIT_EMAIL:-pm@localhost}"
