@@ -1830,19 +1830,24 @@ def write_hub_files(target: Path, cfg: dict):
                           encoding="utf-8")
 
 
-def write_root_files(target: Path, hub: dict, vendor: bool = False):
-    """写仓库根：hub.json 索引 + .gitignore/.gitattributes/README/DSH/启动器/pm.py。"""
+def write_data_files(target: Path, hub: dict):
+    """只写 roadmap 数据仓需要的文件：hub.json + .gitignore/.gitattributes。"""
     (target / ".gitignore").write_text(
         "out/\n.machine\n.pm/\n__pycache__/\n*.pyc\n", encoding="utf-8")
     (target / ".gitattributes").write_text(
         "* text=auto\n*.jsonl text eol=lf\n*.json  text eol=lf\n*.py    text eol=lf\n*.md    text eol=lf\n",
         encoding="utf-8")
+    (target / "hub.json").write_text(
+        json.dumps(hub, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+
+
+def write_root_files(target: Path, hub: dict, vendor: bool = False):
+    """写完整模板仓：数据文件 + README/DSH/启动器/pm.py（仅 scaffold 使用）。"""
+    write_data_files(target, hub)
     (target / "README.md").write_text(README_TMPL.format(name=hub["name"]), encoding="utf-8")
     dsh = target / "DSH.md"
     if not dsh.exists():
         dsh.write_text(DSH_TMPL, encoding="utf-8")
-    (target / "hub.json").write_text(
-        json.dumps(hub, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     write_launchers(target)
     if vendor:
         src = Path(__file__).resolve()
@@ -1993,7 +1998,7 @@ def init_roadmap(name=None, quiet=False) -> dict:
         "projects": {pid: {"name": name, "path": f"projects/{pid}"}},
         "default_project": pid,
     }
-    write_root_files(HUB_ROOT, hub)
+    write_data_files(HUB_ROOT, hub)
     write_hub_files(HUB_ROOT / "projects" / pid, pcfg)
     use_project(pid)
     if not quiet:
@@ -2056,7 +2061,7 @@ def project_add(a):
     (HUB_ROOT / "hub.json").write_text(
         json.dumps(hub, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     if fresh:
-        write_root_files(HUB_ROOT, hub)
+        write_data_files(HUB_ROOT, hub)
     use_project(pid)
     print(f"已添加项目: {pid}（{name}）")
     print(f"  泳道: {' / '.join(load_cfg()['platforms'])}")
