@@ -8,8 +8,8 @@ services:
     restart: unless-stopped
     ports:
       - "${PM_PORT:-8787}:8787"
-    # 以 NAS 用户运行，避免 /data 里的文件变成 root 所有
-    user: "${PUID:-0}:${PGID:-0}"
+    # entrypoint 按 PUID/PGID 动态建 passwd 条目并 su-exec 降权，
+    # 这样 /data 文件归 NAS 用户，ssh 也能查到 uid 对应的用户
     environment:
       PM_TOKEN: "${PM_TOKEN:?set PM_TOKEN in deploy/.env}"
       GIT_SSH_COMMAND: "ssh -i /ssh/id_ed25519 -o UserKnownHostsFile=/ssh/known_hosts -o StrictHostKeyChecking=yes -o IdentitiesOnly=yes"

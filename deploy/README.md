@@ -70,9 +70,10 @@ chmod 600 /volume1/docker/pm-ssh/id_ed25519
 把 `id_ed25519.pub` 加到 GitHub → pm-wish 仓库 → **Settings → Deploy keys**，
 勾选 **Allow write access**。
 
-容器用 `PUID`/`PGID` 运行（`id -u` / `id -g` 得到），这样 `/data` 里的文件归 NAS 用户所有，
-不会出现 root 所有或 Git “dubious ownership”。`PM_SSH_DIR` 目录权限建议 700，私钥 600，
-属主是 `PUID` 对应用户。
+容器入口会按 `PUID`/`PGID` 动态补 `/etc/passwd` 条目，再用 `su-exec` 降权运行
+（`id -u` / `id -g` 得到），这样 `/data` 里的文件归 NAS 用户所有，`ssh` 也能解析
+uid 对应的用户（否则会报 `No user exists for uid ...`）。`PM_SSH_DIR` 目录权限建议 700，
+私钥 600，属主是 `PUID` 对应用户。
 
 验证：
 
