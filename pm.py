@@ -3192,12 +3192,34 @@ def _event(cfg, **kw):
     return ev
 
 
+def ensure_git_remote() -> bool:
+    url = (os.environ.get("GIT_REMOTE") or os.environ.get("PM_GIT_REMOTE") or "").strip()
+    if not url or not (HUB_ROOT / ".git").exists():
+        return False
+    remotes = git("remote").stdout.split()
+    if "origin" in remotes:
+        current = git("remote", "get-url", "origin").stdout.strip()
+        if current and current != url:
+            git("remote", "set-url", "origin", url)
+            print(f"已更新 git remote: origin {url}")
+    else:
+        r = git("remote", "add", "origin", url)
+        if r.returncode:
+            warn(f"配置 git remote 失败：{r.stderr.strip()[:200]}")
+            return False
+        print(f"已配置 git remote: origin {url}")
+    return True
+
+
 def sync_hub(cfg=None) -> dict:
     if not (HUB_ROOT / ".git").exists():
         return {"ok": False, "error": "不是 git 仓库", "messages": []}
     msgs = []
+    ensure_git_remote()
     remotes = git("remote").stdout.split()
-    if remotes:
+    has_upstream = git("rev-parse", "--abbrev-ref", "--symbolic-full-name",
+                       "@{u}").returncode == 0
+    if remotes and has_upstream:
         r = git("pull", "--rebase", "--autostash")
         if r.returncode:
             msgs.append("pull 失败：" + r.stderr.strip()[:160])
@@ -3212,7 +3234,8 @@ def sync_hub(cfg=None) -> dict:
             committed = True
     pushed = False
     if remotes:
-        r = git("push")
+        branch = git("rev-parse", "--abbrev-ref", "HEAD").stdout.strip() or "main"
+        r = git("push", "-u", "origin", branch)
         if r.returncode:
             msgs.append("push 失败：" + r.stderr.strip()[:160])
         else:
@@ -3603,6 +3626,13 @@ def cmd_serve(a):
         if not a.read_only and not token:
             die("远程写面板必须设置 --token 或 PM_TOKEN")
     hub = ensure_hub()
+    if ensure_git_remote():
+        try:
+            result = sync_hub()
+            if not result.get("ok"):
+                warn(f"启动时自动同步失败：{result.get('error')}")
+        except Exception as e:
+            warn(f"启动时自动同步失败：{e}")
     build_all(quiet=True)
     Handler = type("HubHandler", (HubHandler,),
                    {"editable": not a.read_only, "token": token})

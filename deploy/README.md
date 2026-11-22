@@ -45,6 +45,7 @@ PUID=1000
 PGID=1000
 GIT_NAME=your-name
 GIT_EMAIL=you@example.com
+GIT_REMOTE=git@github.com:<your-org>/<your-roadmap>.git
 ```
 
 `ROADMAP` 必须指向 **my-roadmap**，不是 iteration-hub。
