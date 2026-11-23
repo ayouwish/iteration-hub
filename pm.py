@@ -3370,17 +3370,27 @@ def handle_api(path: str, body: dict, cfg: dict) -> dict:
         if priority not in PRIORITY_ORDER:
             return {"ok": False, "error": f"优先级非法: {priority}"}
         ensure_layout()
-        plats = {}
-        for p in lanes:
-            plats[p] = {"status": "todo", "owner": None}
+        chosen = body.get("lanes", body.get("platforms"))
+        if isinstance(chosen, str):
+            chosen = [x.strip() for x in chosen.split(",") if x.strip()]
+        if not chosen:
+            chosen = list(lanes)
+        unknown = [p for p in chosen if p not in lanes]
+        if unknown:
+            return {"ok": False, "error": f"未知泳道: {', '.join(unknown)}"}
+        acceptance = body.get("acceptance") or []
+        if isinstance(acceptance, str):
+            acceptance = [acceptance]
+        plats = {p: {"status": "todo" if p in chosen else "na", "owner": None}
+                 for p in lanes}
         feat = {
             "id": fid,
             "title": title,
             "iteration": iteration,
             "priority": priority,
-            "area": "",
-            "spec": "",
-            "acceptance": [],
+            "area": str(body.get("area") or ""),
+            "spec": str(body.get("spec") or ""),
+            "acceptance": acceptance,
             "contract": {"version": None, "frozen": False, "doc": None},
             "revision": "r1",
             "revisions": [{"rev": "r1", "at": now_utc()[:10], "breaking": False,
