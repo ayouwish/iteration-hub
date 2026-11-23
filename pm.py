@@ -255,12 +255,48 @@ def machine_name(cfg: dict) -> str:
     return sanitize(aliases.get(host, host.lower()))
 
 
+_AUTO_SYNCING = False
+
+
+def auto_sync_enabled() -> bool:
+    flag = os.environ.get("PM_AUTO_SYNC", "").strip().lower()
+    if flag in ("0", "false", "no", "off"):
+        return False
+    if flag in ("1", "true", "yes", "on"):
+        return True
+    try:
+        return bool(load_cfg().get("auto_sync"))
+    except SystemExit:
+        return False
+    except Exception:
+        return False
+
+
+def auto_sync():
+    global _AUTO_SYNCING
+    if _AUTO_SYNCING:
+        return
+    _AUTO_SYNCING = True
+    try:
+        res = sync_hub()
+        if not res.get("ok"):
+            warn(f"自动同步失败：{res.get('error') or res.get('message')}")
+    except SystemExit:
+        warn("自动同步失败：状态已写入，但 git 同步未完成")
+    except Exception as e:
+        warn(f"自动同步失败：{e}")
+    finally:
+        _AUTO_SYNCING = False
+
+
 def append_event(ev: dict):
     d = ROOT / "events" / sanitize(ev["machine"])
     d.mkdir(parents=True, exist_ok=True)
     p = d / f"{ev['ts'][:7]}.jsonl"
     with p.open("a", encoding="utf-8", newline="\n") as fh:
         fh.write(json.dumps(ev, ensure_ascii=False) + "\n")
+    if ev.get("type") in ("status", "claim") and auto_sync_enabled():
+        auto_sync()
 
 
 def load_features() -> dict:
