@@ -41,6 +41,7 @@ PM_TOKEN=<长随机串，例如 openssl rand -hex 24>
 PM_PORT=8787
 ROADMAP=/volume1/docker/my-roadmap
 PM_SSH_DIR=/volume1/docker/pm-ssh
+ASSETS_DIR=/vol1/1000/pm-assets
 PUID=1000
 PGID=1000
 GIT_NAME=your-name
@@ -159,3 +160,14 @@ sudo systemctl enable --now pm
 - 需要公网时，用 nginx/Caddy 加 HTTPS 和认证，再转发到 8787；
 - `PM_TOKEN` 只放在 `.env` / systemd Environment，不要提交；
 - 定期备份 `ROADMAP` 指向的 my-roadmap（它就是 roadmap git 仓库）。
+
+## 多媒体资源（NAS 共享）
+
+大文件（视频、原始截图、APK/IPA）不走 git，统一放 NAS 共享目录：
+
+- `ASSETS_DIR` 指向 NAS 上的共享目录，compose 会挂到容器的 `/assets`；
+- 客户端通过 SMB 访问同一个目录；
+- roadmap 里只记录 manifest（路径 + sha256 + size），不存二进制。
+
+详见仓库根目录的 [ASSETS.md](../ASSETS.md)。
+

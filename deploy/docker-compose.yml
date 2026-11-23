@@ -26,3 +26,5 @@ services:
       - "${ROADMAP:?set ROADMAP in deploy/.env}:/data"
       # pm-wish 的 deploy key 目录（含 id_ed25519 + known_hosts），只读挂载
       - "${PM_SSH_DIR:?set PM_SSH_DIR in deploy/.env}:/ssh:ro"
+      # 多媒体/大文件共享目录（SMB 共享，不进 git）
+      - "${ASSETS_DIR:?set ASSETS_DIR in deploy/.env}:/assets"

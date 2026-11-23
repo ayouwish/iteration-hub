@@ -43,6 +43,8 @@ git clone <your-roadmap-repo>
 
 如果当前 workspace 不是 `iteration-hub`，把 `.dsh/skills/iteration-hub/` 复制到当前 workspace 的 `.dsh/skills/` 下。
 
+> 视频/大图等多媒体资源走 NAS 共享，详见 [ASSETS.md](ASSETS.md)。
+
 ## NAS 部署
 
 `deploy/.env` 必须指定 roadmap 仓：
