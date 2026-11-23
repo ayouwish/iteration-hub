@@ -363,6 +363,17 @@ def bound_project(hub: dict, sess: str):
     return pid if pid in hub["projects"] else None
 
 
+def bound_lane(hub: dict, sess: str):
+    p = bind_path(sess)
+    if not p.exists():
+        return None
+    try:
+        data = json.loads(p.read_text(encoding="utf-8"))
+    except json.JSONDecodeError:
+        return None
+    return data.get("lane") or None
+
+
 def find_project_of_feature(hub: dict, fid: str) -> list:
     return [pid for pid in hub["projects"]
             if (project_dir(pid) / "features" / f"{fid}.json").exists()]
@@ -2302,10 +2313,11 @@ def claim_task(cfg: dict, state: dict, fid: str, lane: str, sess: str, force: bo
     return task_brief(cfg, state, fid, lane)
 
 
-def select_next(state: dict, cfg: dict):
+def select_next(state: dict, cfg: dict, lane=None):
+    lanes = [lane] if lane else list(cfg["lanes"])
     queued = []
     for fid, s in state.items():
-        for lane in cfg["lanes"]:
+        for lane in lanes:
             cell = s["platforms"][lane]
             d = cell.get("dispatch") or {}
             if (d.get("state") == "queued" and not cell.get("session")
@@ -2321,7 +2333,7 @@ def select_next(state: dict, cfg: dict):
             continue
         if not (f.get("plan") or {}).get("approved", True):
             continue
-        for lane in cfg["lanes"]:
+        for lane in lanes:
             cell = s["platforms"][lane]
             if cell["status"] != "todo" or deps_met(state, fid, lane):
                 continue
@@ -2332,10 +2344,11 @@ def select_next(state: dict, cfg: dict):
     return ready[0][1], ready[0][2], "ready"
 
 
-def queue_rows(state: dict, cfg: dict):
+def queue_rows(state: dict, cfg: dict, lane=None):
+    lanes = [lane] if lane else list(cfg["lanes"])
     rows = []
     for fid, s in state.items():
-        for lane in cfg["lanes"]:
+        for lane in lanes:
             cell = s["platforms"][lane]
             d = cell.get("dispatch") or {}
             if d.get("state") == "queued" and not cell.get("session"):
@@ -2365,7 +2378,9 @@ def cmd_next(a):
     cfg = load_cfg()
     state = fold(cfg, load_features(), read_events())
     sess = current_session(cfg, a.session)
-    pick = select_next(state, cfg)
+    hub = load_hub()
+    bound = bound_lane(hub, sess)
+    pick = select_next(state, cfg, lane=bound)
     if not pick:
         print("没有待认领的派工，也没有可开工任务。")
         return
@@ -2380,6 +2395,11 @@ def cmd_task(a):
     cfg = load_cfg()
     state = fold(cfg, load_features(), read_events())
     fid, lane = parse_task_ref(a.task, a.lane, cfg)
+    hub = load_hub()
+    bound = bound_lane(hub, current_session(cfg, a.session))
+    if bound and lane and lane != bound:
+        die(f"本会话绑定在泳道 {bound}，不能领取 {lane}")
+    lane = lane or bound
     if fid not in state:
         die(f"需求不存在: {fid}")
     if not lane:
@@ -2397,10 +2417,11 @@ def cmd_task(a):
 
 
 def report_task(cfg: dict, state: dict, fid, lane, sess: str, status=None,
-                rev=None, note=None, blocked_by=None, eta=None):
+                rev=None, note=None, blocked_by=None, eta=None, lane_filter=None):
     if not fid:
         found = [(fid, p) for fid, s in state.items() for p in cfg["lanes"]
-                 if s["platforms"][p].get("session") == sess]
+                 if s["platforms"][p].get("session") == sess
+                 and (lane_filter is None or p == lane_filter)]
         if not found:
             die("没有找到本会话领取的任务；请指定 pm report <ID>:<lane> ...")
         if len(found) > 1 and not status:
@@ -2426,16 +2447,21 @@ def cmd_report(a):
     cfg = load_cfg()
     state = fold(cfg, load_features(), read_events())
     sess = current_session(cfg, a.session)
+    hub = load_hub()
+    bound = bound_lane(hub, sess)
     fid, lane = (parse_task_ref(a.task, a.lane, cfg) if a.task else (None, None))
+    if bound and lane and lane != bound:
+        die(f"本会话绑定在泳道 {bound}，不能上报 {lane}")
     _, _, msg = report_task(cfg, state, fid, lane, sess, a.status, a.rev, a.note,
-                            a.blocked_by, a.eta)
+                            a.blocked_by, a.eta, lane_filter=bound)
     print(msg)
 
 
 def cmd_queue(a):
     cfg = load_cfg()
     state = fold(cfg, load_features(), read_events())
-    rows = queue_rows(state, cfg)
+    hub = load_hub()
+    rows = queue_rows(state, cfg, lane=bound_lane(hub, current_session(cfg, a.session)))
     if not rows:
         print("派工队列为空。")
         return
@@ -2779,16 +2805,24 @@ def cmd_bind(a):
     if not a.project:
         p = bind_path(sess)
         if p.exists():
-            print(json.loads(p.read_text(encoding="utf-8")).get("project"))
+            b = json.loads(p.read_text(encoding="utf-8"))
+            print(f"{b.get('project')}" + (f":{b.get('lane')}" if b.get("lane") else ""))
         else:
             print(f"未绑定（可用: {', '.join(hub['projects'])}）")
         return
     if a.project not in hub["projects"]:
         die(f"未知项目: {a.project}（可用: {', '.join(hub['projects'])}）")
+    lane = None
+    if getattr(a, "lane", None):
+        use_project(a.project)
+        cfg = load_cfg()
+        lane = a.lane
+        if lane not in cfg["lanes"]:
+            die(f"未知泳道: {lane}（可用: {', '.join(cfg['lanes'])}）")
     bind_path(sess).write_text(
-        json.dumps({"project": a.project, "session": sess, "bound_at": now_utc()},
-                   ensure_ascii=False) + "\n", encoding="utf-8")
-    print(f"本会话（{sess}）已绑定项目: {a.project}")
+        json.dumps({"project": a.project, "lane": lane, "session": sess,
+                    "bound_at": now_utc()}, ensure_ascii=False) + "\n", encoding="utf-8")
+    print(f"本会话（{sess}）已绑定项目: {a.project}" + (f" / 泳道: {lane}" if lane else ""))
 
 
 def cmd_projects(a):
@@ -3110,19 +3144,26 @@ def run_remote(cmd, a, url, token):
         meta = remote_call(url, token, "GET", f"/api/meta?session={sess}")
         projects = meta.get("projects") or {}
         if not a.project:
-            print(meta.get("binding") or f"未绑定（可用: {', '.join(projects)}）")
+            cur = meta.get("binding")
+            lane = meta.get("binding_lane")
+            print((cur + (f":{lane}" if lane else "")) if cur
+                  else f"未绑定（可用: {', '.join(projects)}）")
             return
         if a.project not in projects:
             die(f"未知项目: {a.project}（可用: {', '.join(projects)}）")
         r = remote_call(url, token, "POST", "/api/bind",
-                        {"project": a.project, "session": sess})
-        print(f"本会话（{sess}）已绑定项目: {r.get('project', a.project)}")
+                        {"project": a.project, "lane": getattr(a, "lane", None),
+                         "session": sess})
+        label = r.get("project", a.project) + (f":{r['lane']}" if r.get("lane") else "")
+        print(f"本会话（{sess}）已绑定: {label}")
         return
     if cmd == "projects":
         meta = remote_call(url, token, "GET", f"/api/meta?session={sess}")
         projects = meta.get("projects") or {}
         cur = meta.get("binding")
-        print(f"远程: {url}  会话: {sess}  绑定: {cur or '未绑定'}")
+        lane = meta.get("binding_lane")
+        label = (cur + (f":{lane}" if lane else "")) if cur else "未绑定"
+        print(f"远程: {url}  会话: {sess}  绑定: {label}")
         for pid, m in projects.items():
             print(f"  {pad(pid, 18)}{m.get('name', pid)}{' *' if pid == cur else ''}")
         return
@@ -3413,16 +3454,21 @@ def server_bind_dir() -> Path:
     return d
 
 
-def read_server_binding(sess: str):
+def read_server_binding_full(sess: str):
     if not sess:
         return None
     p = server_bind_dir() / f"{sanitize(sess)}.json"
     if not p.exists():
         return None
     try:
-        return json.loads(p.read_text(encoding="utf-8")).get("project")
+        return json.loads(p.read_text(encoding="utf-8"))
     except json.JSONDecodeError:
         return None
+
+
+def read_server_binding(sess: str):
+    b = read_server_binding_full(sess)
+    return b.get("project") if b else None
 
 
 class HubHandler(BaseHTTPRequestHandler):
@@ -3467,21 +3513,30 @@ class HubHandler(BaseHTTPRequestHandler):
             return pid
         return hub["default_project"]
 
+    def _bound_lane(self, body=None):
+        b = read_server_binding_full(self._session(body))
+        return b.get("lane") if b else None
+
     def _bind(self, body):
         hub = load_hub()
         project = body.get("project")
+        lane = str(body.get("lane") or "").strip() or None
         sess = str(body.get("session") or "remote")
         p = server_bind_dir() / f"{sanitize(sess)}.json"
         if not project:
             if p.exists():
                 p.unlink()
-            return {"ok": True, "project": None, "session": sess}
+            return {"ok": True, "project": None, "lane": None, "session": sess}
         if project not in hub["projects"]:
             return {"ok": False, "error": f"未知项目: {project}"}
-        p.write_text(json.dumps({"project": project, "session": sess,
+        use_project(project)
+        cfg = load_cfg()
+        if lane and lane not in cfg["lanes"]:
+            return {"ok": False, "error": f"未知泳道: {lane}"}
+        p.write_text(json.dumps({"project": project, "lane": lane, "session": sess,
                                  "bound_at": now_utc()}, ensure_ascii=False) + "\n",
                      encoding="utf-8")
-        return {"ok": True, "project": project, "session": sess}
+        return {"ok": True, "project": project, "lane": lane, "session": sess}
 
     def _auth_ok(self):
         if not self.token:
@@ -3523,6 +3578,11 @@ class HubHandler(BaseHTTPRequestHandler):
         sess = str(body.get("session") or "remote")
         fid = body.get("feature")
         lane = body.get("lane")
+        bound_lane = self._bound_lane(body)
+        if bound_lane and lane and lane != bound_lane:
+            return {"ok": False, "error": f"本会话绑定在泳道 {bound_lane}，不能领取 {lane}"}
+        if bound_lane and not lane:
+            lane = bound_lane
         if fid:
             if not lane:
                 options = [p for p in cfg["lanes"]
@@ -3533,7 +3593,7 @@ class HubHandler(BaseHTTPRequestHandler):
                 lane = options[0]
             brief = claim_task(cfg, state, fid, lane, sess, bool(body.get("force")))
             return {"ok": True, "feature": fid, "lane": lane, "brief": brief}
-        pick = select_next(state, cfg)
+        pick = select_next(state, cfg, lane=bound_lane)
         if not pick:
             return {"ok": False, "error": "没有待认领的派工，也没有可开工任务"}
         fid, lane, source = pick
@@ -3543,10 +3603,14 @@ class HubHandler(BaseHTTPRequestHandler):
     def _report(self, cfg, body):
         state = fold(cfg, load_features(), read_events())
         sess = str(body.get("session") or "remote")
+        bound_lane = self._bound_lane(body)
+        lane_arg = body.get("lane")
+        if bound_lane and lane_arg and lane_arg != bound_lane:
+            return {"ok": False, "error": f"本会话绑定在泳道 {bound_lane}，不能上报 {lane_arg}"}
         fid, lane, msg = report_task(
-            cfg, state, body.get("feature"), body.get("lane"), sess,
+            cfg, state, body.get("feature"), lane_arg, sess,
             body.get("status"), body.get("rev"), body.get("note"),
-            body.get("blocked_by"), body.get("eta"))
+            body.get("blocked_by"), body.get("eta"), lane_filter=bound_lane)
         return {"ok": True, "feature": fid, "lane": lane, "message": msg}
 
     def do_GET(self):
@@ -3581,12 +3645,15 @@ class HubHandler(BaseHTTPRequestHandler):
                 elif path == "/api/meta":
                     meta = meta_info(self.editable)
                     meta["binding"] = read_server_binding(self._session())
+                    b = read_server_binding_full(self._session())
+                    meta["binding_lane"] = b.get("lane") if b else None
                     self._json(200, meta)
                 elif path == "/api/queue":
                     with self.lock:
                         use_project(self._project())
                         cfg = load_cfg()
-                        rows = queue_rows(fold(cfg, load_features(), read_events()), cfg)
+                        rows = queue_rows(fold(cfg, load_features(), read_events()), cfg,
+                                          lane=self._bound_lane())
                     self._json(200, {"ok": True, "rows": rows})
                 else:
                     self._json(404, {"ok": False, "error": "not found"})
@@ -3928,8 +3995,9 @@ def main(argv=None):
     p.add_argument("--clear", action="store_true")
     p.set_defaults(func=cmd_connect)
 
-    p = sub.add_parser("bind", help="把当前 DSH 会话绑定到项目")
+    p = sub.add_parser("bind", help="把当前 DSH 会话绑定到项目/泳道")
     p.add_argument("project", nargs="?")
+    p.add_argument("--lane", default=None)
     p.add_argument("--clear", action="store_true")
     p.set_defaults(func=cmd_bind)
 
