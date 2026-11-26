@@ -30,7 +30,9 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
+import mimetypes
 import os
 import re
 import secrets
@@ -1880,7 +1882,7 @@ def write_hub_files(target: Path, cfg: dict):
 def write_data_files(target: Path, hub: dict):
     """只写 roadmap 数据仓需要的文件：hub.json + .gitignore/.gitattributes。"""
     (target / ".gitignore").write_text(
-        "out/\n.machine\n.pm/\n__pycache__/\n*.pyc\n", encoding="utf-8")
+        "out/\n.machine\n.pm/\nassets/\n__pycache__/\n*.pyc\n", encoding="utf-8")
     (target / ".gitattributes").write_text(
         "* text=auto\n*.jsonl text eol=lf\n*.json  text eol=lf\n*.py    text eol=lf\n*.md    text eol=lf\n",
         encoding="utf-8")
@@ -2861,6 +2863,32 @@ def cmd_bind(a):
     print(f"本会话（{sess}）已绑定项目: {a.project}" + (f" / 泳道: {lane}" if lane else ""))
 
 
+def cmd_asset(a):
+    if a.action == "url":
+        print(asset_url(a.id))
+        return
+    if a.action == "list":
+        rows = list_assets(a.feature)
+        if not rows:
+            print("没有资产。")
+            return
+        for row in rows:
+            print(f"{row.get('id','')[:12]}  {row.get('name',''):<28}"
+                  f"{row.get('size',0):>10}  {row.get('feature') or '-'}  {row.get('url')}")
+        return
+    path = Path(a.file).expanduser()
+    if not path.is_file():
+        die(f"文件不存在: {path}")
+    data = path.read_bytes()
+    if len(data) > asset_max_bytes():
+        die(f"文件超过 ASSET_MAX_MB（{len(data)} bytes）")
+    mime = mimetypes.guess_type(str(path))[0] or "application/octet-stream"
+    entry = store_asset(a.feature, a.name or path.name, data, mime, session_id())
+    print(f"已添加资产: {entry['id']}")
+    print(f"  {entry['url']}")
+    print("  assets.json 已更新；pm sync 提交（二进制不进 git 时把 assets 目录排除）")
+
+
 def cmd_projects(a):
     hub = load_hub()
     sess = session_id()
@@ -3507,6 +3535,120 @@ def read_server_binding(sess: str):
     return b.get("project") if b else None
 
 
+
+ASSET_DEFAULT_MAX_MB = 50
+
+
+def asset_root() -> Path:
+    env = os.environ.get("ASSET_DIR", "").strip()
+    root = Path(env).expanduser() if env else (HUB_ROOT / "assets")
+    root.mkdir(parents=True, exist_ok=True)
+    return root
+
+
+def asset_max_bytes() -> int:
+    try:
+        mb = int(os.environ.get("ASSET_MAX_MB", str(ASSET_DEFAULT_MAX_MB)))
+    except ValueError:
+        mb = ASSET_DEFAULT_MAX_MB
+    return max(1, mb) * 1024 * 1024
+
+
+def asset_base_url() -> str:
+    return (os.environ.get("ASSET_BASE_URL") or "").strip().rstrip("/")
+
+
+def asset_manifest_path() -> Path:
+    return ROOT / "assets.json"
+
+
+def load_assets() -> dict:
+    p = asset_manifest_path()
+    if p.exists():
+        try:
+            doc = json.loads(p.read_text(encoding="utf-8"))
+            if isinstance(doc, dict):
+                doc.setdefault("files", [])
+                return doc
+        except json.JSONDecodeError:
+            pass
+    return {"store": os.environ.get("ASSET_STORE", "fs"), "files": []}
+
+
+def save_assets(doc: dict):
+    p = asset_manifest_path()
+    p.parent.mkdir(parents=True, exist_ok=True)
+    p.write_text(json.dumps(doc, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+
+
+def asset_ext(name: str) -> str:
+    suffix = Path(name or "").suffix.lower()
+    return suffix if re.match(r"^\.[a-z0-9]{1,8}$", suffix) else ""
+
+
+def asset_url(asset_id: str) -> str:
+    base = asset_base_url()
+    return f"{base}/{asset_id}" if base else f"/api/assets/{asset_id}"
+
+
+def asset_store_path(asset_id: str, ext: str) -> Path:
+    return asset_root() / CURRENT_PID / asset_id[:2] / (asset_id + ext)
+
+
+def store_asset(feature, name, data: bytes, mime: str, session: str = "") -> dict:
+    sha = hashlib.sha256(data).hexdigest()
+    ext = asset_ext(name)
+    path = asset_store_path(sha, ext)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    if not path.exists():
+        path.write_bytes(data)
+    doc = load_assets()
+    files = doc.setdefault("files", [])
+    entry = next((x for x in files if x.get("sha256") == sha), None)
+    if entry is None:
+        entry = {
+            "id": sha,
+            "sha256": sha,
+            "name": name or ("asset" + ext),
+            "feature": feature or None,
+            "mime": mime or "application/octet-stream",
+            "size": len(data),
+            "created_at": now_utc(),
+            "session": session or None,
+        }
+        files.append(entry)
+    else:
+        if feature:
+            entry["feature"] = feature
+    save_assets(doc)
+    out = dict(entry)
+    out["url"] = asset_url(sha)
+    return out
+
+
+def find_asset(asset_id: str):
+    doc = load_assets()
+    for entry in doc.get("files", []):
+        if entry.get("sha256") == asset_id or entry.get("id") == asset_id:
+            ext = asset_ext(entry.get("name", ""))
+            path = asset_store_path(asset_id, ext)
+            if path.exists():
+                return entry, path
+    return None, None
+
+
+def list_assets(feature=None):
+    doc = load_assets()
+    rows = []
+    for entry in doc.get("files", []):
+        if feature and entry.get("feature") != feature:
+            continue
+        item = dict(entry)
+        item["url"] = asset_url(entry.get("sha256") or entry.get("id"))
+        rows.append(item)
+    return rows
+
+
 class HubHandler(BaseHTTPRequestHandler):
     editable = True
     token = None
@@ -3583,6 +3725,30 @@ class HubHandler(BaseHTTPRequestHandler):
             return True
         from urllib.parse import parse_qs, urlparse
         return self.token in (parse_qs(urlparse(self.path).query).get("token") or [])
+
+    def _asset_session(self, body=None):
+        return self._session(body) or (self.headers.get("X-PM-Session") or "")
+
+    def _asset_upload(self):
+        from urllib.parse import parse_qs, urlparse
+        q = parse_qs(urlparse(self.path).query)
+        project = (q.get("project") or [None])[0] or self._project()
+        feature = (q.get("feature") or [None])[0] or None
+        name = (q.get("name") or [None])[0] or "asset.bin"
+        length = int(self.headers.get("Content-Length") or 0)
+        if length <= 0:
+            return self._json(400, {"ok": False, "error": "空文件"})
+        if length > asset_max_bytes():
+            return self._json(413, {"ok": False, "error": "文件超过 ASSET_MAX_MB"})
+        data = self.rfile.read(length)
+        if len(data) != length:
+            return self._json(400, {"ok": False, "error": "文件读取不完整"})
+        with self.lock:
+            use_project(project)
+            entry = store_asset(feature, name, data,
+                                self.headers.get("Content-Type") or "application/octet-stream",
+                                self._asset_session())
+        self._json(200, {"ok": True, **entry})
 
     def _project_add(self, body):
         pid = str(body.get("id") or "").strip()
@@ -3673,7 +3839,24 @@ class HubHandler(BaseHTTPRequestHandler):
             elif path.startswith("/api/"):
                 if not self._auth_ok():
                     return self._json(401, {"ok": False, "error": "未授权：需要 Bearer token"})
-                if path == "/api/state":
+                if path == "/api/assets":
+                    from urllib.parse import parse_qs, urlparse
+                    with self.lock:
+                        use_project(self._project())
+                        feature = (parse_qs(urlparse(self.path).query).get("feature") or [None])[0]
+                        rows = list_assets(feature)
+                    self._json(200, {"ok": True, "assets": rows})
+                elif path.startswith("/api/assets/"):
+                    asset_id = path.rsplit("/", 1)[-1]
+                    with self.lock:
+                        use_project(self._project())
+                        entry, file_path = find_asset(asset_id)
+                    if entry is None:
+                        self._json(404, {"ok": False, "error": "资产不存在"})
+                    else:
+                        self._send(200, file_path.read_bytes(),
+                                   entry.get("mime") or "application/octet-stream")
+                elif path == "/api/state":
                     with self.lock:
                         use_project(self._project())
                         doc = build_one(load_cfg(), quiet=True)
@@ -3698,12 +3881,34 @@ class HubHandler(BaseHTTPRequestHandler):
         except Exception as e:
             self._json(400, {"ok": False, "error": str(e)})
 
+    def do_HEAD(self):
+        path = self.path.split("?")[0]
+        if not path.startswith("/api/assets/"):
+            return self._json(404, {"ok": False, "error": "not found"})
+        if not self._auth_ok():
+            return self._json(401, {"ok": False, "error": "未授权"})
+        asset_id = path.rsplit("/", 1)[-1]
+        with self.lock:
+            use_project(self._project())
+            entry, file_path = find_asset(asset_id)
+        if entry is None:
+            return self._json(404, {"ok": False, "error": "资产不存在"})
+        self.send_response(200)
+        self.send_header("Content-Type", entry.get("mime") or "application/octet-stream")
+        self.send_header("Content-Length", str(file_path.stat().st_size))
+        self.end_headers()
+
     def do_POST(self):
         path = self.path.split("?")[0]
         if not self._auth_ok():
             return self._json(401, {"ok": False, "error": "未授权：需要 Bearer token"})
         if not self.editable:
             return self._json(403, {"ok": False, "error": "只读模式：不开放写入"})
+        if path == "/api/assets":
+            try:
+                return self._asset_upload()
+            except Exception as e:
+                return self._json(500, {"ok": False, "error": str(e)})
         try:
             n = int(self.headers.get("Content-Length") or 0)
             body = json.loads(self.rfile.read(n).decode("utf-8-sig") or "{}")
@@ -3983,6 +4188,20 @@ def main(argv=None):
     p = sub.add_parser("shots", help="生成跨端截图对齐页 / 检查缺失")
     p.add_argument("--check", action="store_true")
     p.set_defaults(func=cmd_shots)
+
+    p = sub.add_parser("asset", help="资产：add / list / url")
+    sp = p.add_subparsers(dest="action", required=True)
+    pa = sp.add_parser("add", help="把本地文件加入资产存储并写 manifest")
+    pa.add_argument("--file", required=True)
+    pa.add_argument("--feature", default=None)
+    pa.add_argument("--name", default=None)
+    pa.set_defaults(func=cmd_asset)
+    pl = sp.add_parser("list", help="列出资产")
+    pl.add_argument("--feature", default=None)
+    pl.set_defaults(func=cmd_asset)
+    pu = sp.add_parser("url", help="输出资产 URL")
+    pu.add_argument("--id", required=True)
+    pu.set_defaults(func=cmd_asset)
 
     p = sub.add_parser("contract", help="冻结/解冻某需求的接口契约")
     p.add_argument("feature")

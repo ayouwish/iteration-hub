@@ -42,6 +42,8 @@ PM_PORT=8787
 ROADMAP=/volume1/docker/my-roadmap
 PM_SSH_DIR=/volume1/docker/pm-ssh
 ASSETS_DIR=/vol1/1000/pm-assets
+ASSET_BASE_URL=
+ASSET_MAX_MB=50
 PUID=1000
 PGID=1000
 GIT_NAME=your-name
@@ -166,8 +168,9 @@ sudo systemctl enable --now pm
 大文件（视频、原始截图、APK/IPA）不走 git，统一放 NAS 共享目录：
 
 - `ASSETS_DIR` 指向 NAS 上的共享目录，compose 会挂到容器的 `/assets`；
-- 客户端通过 SMB 访问同一个目录；
-- roadmap 里只记录 manifest（路径 + sha256 + size），不存二进制。
+- 客户端通过 SMB 访问同一个目录，或走 `/api/assets` 上传/下载；
+- roadmap 里只记录 manifest（sha256 + size），不存二进制；
+- `ASSET_BASE_URL` 可指向 CDN/Nginx/R2，API 返回的 url 自动变成 CDN 地址。
 
 详见仓库根目录的 [ASSETS.md](../ASSETS.md)。
 

@@ -20,6 +20,9 @@ services:
       GIT_COMMITTER_NAME: "${GIT_NAME:-pm}"
       GIT_COMMITTER_EMAIL: "${GIT_EMAIL:-pm@localhost}"
       GIT_REMOTE: "${GIT_REMOTE:-}"
+      ASSET_DIR: /assets
+      ASSET_BASE_URL: "${ASSET_BASE_URL:-}"
+      ASSET_MAX_MB: "${ASSET_MAX_MB:-50}"
       HOME: /tmp
     volumes:
       # iteration-hub 是服务仓；这里挂载的是你的 roadmap 数据仓

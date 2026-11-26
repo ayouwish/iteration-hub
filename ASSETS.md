@@ -1,181 +1,137 @@
-# 多媒体资源：走 NAS 共享，不走 Git
+# Asset Store：通用资源服务
 
-原则：
+多媒体/大文件不进 Git，由 pm 的 Asset Store 统一管理。
+NAS/SMB 只是其中一种 `fs` 后端；换成对象存储或 CDN 时，roadmap 和客户端都不变。
 
-- **文本/配置**（feature JSON、spec、design tokens）→ roadmap git；
-- **截图/小图** → 压缩后可进 git；
-- **视频、原始截图、APK/IPA、构建产物** → NAS 共享目录，roadmap 只存 manifest。
-
-## 1. 在 fnOS 上建共享
-
-1. 打开 fnOS 控制台 → **共享文件夹** → 新建，例如 `pm-assets`；
-2. 权限给 NAS 用户 `drinkwish`（或你实际使用的用户）**读写**；
-3. 打开 **文件服务 / SMB**，确认 SMB 已启用；
-4. 确认共享在局域网可访问：
+## 模型
 
 ```
-\\192.168.50.104\pm-assets
+client / DSH
+     │  HTTP /api/assets
+     ▼
+ Asset Store (pm.py)
+     │ provider
+     ├── fs  → ASSET_DIR（NAS 共享 / 本地盘 / 容器 /assets）
+     ├── s3  → MinIO / R2 / S3（后续）
+     └── http→ 只读 CDN（ASSET_BASE_URL）
 ```
 
-5. 记下 fnOS 上的实际路径，例如：
+- **内容寻址**：id = sha256，不可变，天然适合 CDN 缓存；
+- roadmap 只存 `projects/<pid>/assets.json`（文本），二进制不进 Git；
+- 客户端不需要挂载 SMB，走 HTTP 上传/下载；局域网也可以继续用 SMB。
 
-```
-/vol1/1000/pm-assets
-```
+## 配置
 
-把它填进 `deploy/.env`：
+`deploy/.env`：
 
 ```ini
+# fs provider 的根（compose 会挂到容器 /assets）
 ASSETS_DIR=/vol1/1000/pm-assets
+
+# 可选：对外 CDN/Nginx/R2 基地址；留空则用 /api/assets/<id>
+ASSET_BASE_URL=
+
+# 可选：单文件上限
+ASSET_MAX_MB=50
 ```
 
-compose 会把它挂到容器的 `/assets`，并保证 PUID/PGID 可读写。
+compose 会设置：
 
-## 2. 客户端挂载
-
-### Windows
-
-```powershell
-net use Z: \\192.168.50.104\pm-assets /user:drinkwish *
+```yaml
+environment:
+  ASSET_DIR: /assets
+  ASSET_BASE_URL: "${ASSET_BASE_URL:-}"
+  ASSET_MAX_MB: "${ASSET_MAX_MB:-50}"
+volumes:
+  - "${ASSETS_DIR}:/assets"
 ```
 
-或在资源管理器地址栏输入 `\\192.168.50.104\pm-assets`，映射为 `Z:`。
+## API
 
-### WSL
+```text
+POST /api/assets?project=<pid>&feature=<fid>&name=<filename>
+     Authorization: Bearer <token>
+     Content-Type: <mime>
+     body: 二进制
+     → {ok, id, sha256, name, feature, mime, size, url}
 
-优先复用 Windows 已映射的盘：
-
+GET  /api/assets?project=<pid>&feature=<fid>     # 列表
+GET  /api/assets/<id>                            # 下载
+HEAD /api/assets/<id>                            # 存在性/长度
 ```
-/mnt/z
-```
 
-如果没映射，用 drvfs 挂载：
+示例：
 
 ```bash
-sudo mkdir -p /mnt/pm-assets
-sudo mount -t drvfs '\\192.168.50.104\pm-assets' /mnt/pm-assets
+curl -X POST "http://192.168.50.104:8787/api/assets?project=iteration-hub&feature=F-2026-11-01&name=demo.mp4" \
+  -H "Authorization: Bearer $PM_TOKEN" \
+  -H "Content-Type: video/mp4" \
+  --data-binary @demo.mp4
 ```
 
-或用 CIFS（需要 cifs-utils；WSL 内核支持时可用）：
+重复内容会复用同一个 `sha256`，不会重复存储。
+
+## CLI
 
 ```bash
-sudo apt install cifs-utils
-sudo mkdir -p /mnt/pm-assets
-sudo mount -t cifs //192.168.50.104/pm-assets /mnt/pm-assets \
-  -o username=drinkwish,uid=$(id -u),gid=$(id -g),iocharset=utf8
+pm asset add --file demo.mp4 --feature F-2026-11-01
+pm asset list --feature F-2026-11-01
+pm asset url --id <sha256>
 ```
 
-### macOS
+`pm asset add` 会把文件写入 `ASSET_DIR` 并更新 `assets.json`；二进制目录被 `.gitignore` 排除，`pm sync` 只提交 manifest。
 
-Finder → 前往 → 连接服务器：
+## manifest
 
-```
-smb://192.168.50.104/pm-assets
-```
-
-### Linux
-
-```bash
-sudo mount -t cifs //192.168.50.104/pm-assets /mnt/pm-assets \
-  -o username=drinkwish,uid=$(id -u),gid=$(id -g)
-```
-
-## 3. 目录约定
-
-```
-pm-assets/
-└── iteration-hub/
-    └── F-2026-11-01/
-        ├── demo.mp4
-        ├── screenshot-01.png
-        └── ...
-```
-
-规则：
-
-```
-<project>/<feature>/<filename>
-```
-
-同一 feature 的所有大文件放一个目录，方便整体归档。
-
-## 4. roadmap 只存 manifest
-
-在项目目录下建 `assets.json`（会进 git，但只有文本）：
+`projects/<pid>/assets.json`：
 
 ```json
 {
-  "root": "pm-assets/iteration-hub",
+  "store": "fs",
   "files": [
     {
-      "feature": "F-2026-11-01",
-      "name": "demo.mp4",
-      "path": "F-2026-11-01/demo.mp4",
+      "id": "sha256:…",
       "sha256": "…",
-      "size": 12345678
+      "name": "demo.mp4",
+      "feature": "F-2026-11-01",
+      "mime": "video/mp4",
+      "size": 12345678,
+      "created_at": "2026-11-27T00:00:00Z",
+      "url": "/api/assets/…"
     }
   ]
 }
 ```
 
-路径相对于 NAS 共享根目录，不写绝对路径，换机器也能用。
+## fs 后端：fnOS / NAS 共享
 
-计算 sha256：
+`ASSETS_DIR` 指向 NAS 上的共享目录，例如 `/vol1/1000/pm-assets`：
 
-```powershell
-Get-FileHash .\demo.mp4 -Algorithm SHA256
-```
+1. fnOS 控制台 → 共享文件夹 → 新建 `pm-assets`；
+2. 给 NAS 用户（如 `drinkwish`）读写权限；
+3. 启用 SMB；
+4. compose 把 `/vol1/1000/pm-assets` 挂到容器 `/assets`；
+5. PUID/PGID 对齐后，容器和 SMB 用户都能读写。
 
-```bash
-sha256sum demo.mp4
-```
+客户端如果只想直接拖文件，也可以挂 SMB：
 
-## 5. 容器里的访问
+- Windows：`\\192.168.50.104\pm-assets` 或 `net use Z: ...`
+- WSL：`/mnt/z` 或 `drvfs`/`cifs` 挂载
+- macOS：`smb://192.168.50.104/pm-assets`
+- Linux：`mount -t cifs ...`
 
-`deploy/.env`：
+SMB 只是 fs 后端的局域网入口；HTTP API 才是通用能力。
 
-```ini
-ASSETS_DIR=/vol1/1000/pm-assets
-```
+## CDN / 对象存储
 
-compose 已挂载：
+- 把 `ASSET_BASE_URL` 指向 Nginx/Caddy/R2 公共域名，API 返回的 `url` 自动变成 CDN 地址；
+- 内容寻址 + 长缓存：`Cache-Control: public, max-age=31536000, immutable`；
+- 后续加 `ASSET_STORE=s3`（MinIO/R2），roadmap 和客户端不变；
+- 私有资源用签名 URL（后续阶段）。
 
-```yaml
-volumes:
-  - "${ASSETS_DIR}:/assets"
-```
+## 安全
 
-容器里的路径就是 `/assets/iteration-hub/F-2026-11-01/...`。
-如果容器用户 PUID 读不了，在 NAS 上：
-
-```bash
-chown -R <PUID>:<PGID> /vol1/1000/pm-assets
-chmod -R u+rwX /vol1/1000/pm-assets
-```
-
-## 6. 不要把共享目录放进 git
-
-如果共享挂载在仓库里（例如 `iteration-hub/pm-assets`），加到 `.gitignore`：
-
-```
-pm-assets/
-```
-
-更推荐挂在仓库外（`Z:`、`/mnt/pm-assets`），从根上避免误提交。
-
-## 7. 当前限制
-
-`pm.py` 和 dsh-pm 插件目前只同步 roadmap 里的文本/manifest，**不传输二进制**。
-所以：
-
-- 人在局域网：直接通过 SMB 写共享目录；
-- DSH 会话：先挂载共享目录，再读写；
-- 远程 session 无法挂载时，才需要后续加 `/api/asset` 上传/下载接口。
-
-如果以后要让远程 session 也能传，我可以在 `pm.py` 加：
-
-- `POST /api/asset`（token、大小限制、sha256）
-- `GET /api/asset`
-- 插件工具 `pm_asset_upload` / `pm_asset_list`
-
-但在局域网内，SMB 共享是最省事、最稳的方案。
+- 上传/下载都走 pm token；
+- 限制 `ASSET_MAX_MB`，校验 sha256/长度；
+- `ASSET_DIR` 不要放进 Git；`.gitignore` 已包含 `assets/`；
+- SMB 只开局域网；公网走 HTTPS/CDN。
