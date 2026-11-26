@@ -2864,6 +2864,20 @@ def cmd_bind(a):
 
 
 def cmd_asset(a):
+    if a.action == "check":
+        problems = []
+        for row in load_assets().get("files", []):
+            entry, path = find_asset(row.get("sha256") or row.get("id") or "")
+            if entry is None:
+                problems.append(f"缺失: {row.get('sha256') or row.get('id')} {row.get('name')}")
+            elif path.stat().st_size != row.get("size"):
+                problems.append(f"大小不符: {row.get('sha256')} {row.get('name')}")
+        for x in problems:
+            print(f"! {x}")
+        if problems:
+            sys.exit(1)
+        print("资产文件检查通过")
+        return
     if a.action == "url":
         print(asset_url(a.id))
         return
@@ -3595,7 +3609,18 @@ def asset_store_path(asset_id: str, ext: str) -> Path:
     return asset_root() / CURRENT_PID / asset_id[:2] / (asset_id + ext)
 
 
+def normalize_asset_mime(value, name: str) -> str:
+    mime = (value or mimetypes.guess_type(name or "")[0]
+            or "application/octet-stream").strip().lower()
+    if not re.match(r"^[a-z0-9][a-z0-9!#$&^_.+-]*/[a-z0-9][a-z0-9!#$&^_.+-]*$", mime):
+        return "application/octet-stream"
+    return mime
+
+
 def store_asset(feature, name, data: bytes, mime: str, session: str = "") -> dict:
+    if feature and not (ROOT / "features" / f"{feature}.json").exists():
+        die(f"需求不存在: {feature}")
+    mime = normalize_asset_mime(mime, name)
     sha = hashlib.sha256(data).hexdigest()
     ext = asset_ext(name)
     path = asset_store_path(sha, ext)
@@ -4202,6 +4227,8 @@ def main(argv=None):
     pu = sp.add_parser("url", help="输出资产 URL")
     pu.add_argument("--id", required=True)
     pu.set_defaults(func=cmd_asset)
+    pc = sp.add_parser("check", help="检查 manifest 与 ASSET_DIR 文件")
+    pc.set_defaults(func=cmd_asset)
 
     p = sub.add_parser("contract", help="冻结/解冻某需求的接口契约")
     p.add_argument("feature")

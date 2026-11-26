@@ -129,7 +129,19 @@ SMB 只是 fs 后端的局域网入口；HTTP API 才是通用能力。
 - 后续加 `ASSET_STORE=s3`（MinIO/R2），roadmap 和客户端不变；
 - 私有资源用签名 URL（后续阶段）。
 
-## 安全
+## 校验
+
+```bash
+# manifest 与 ASSET_DIR 文件是否一致（缺失/大小不符）
+pm asset check
+
+# 或手工核对
+sha256sum /vol1/1000/pm-assets/<pid>/<ab>/<sha256>*
+cat projects/<pid>/assets.json
+```
+
+`pm asset check` 检查 manifest 中每个 `sha256` 是否存在于 `ASSET_DIR`，并核对大小；缺失时退出码非 0。
+
 
 - 上传/下载都走 pm token；
 - 限制 `ASSET_MAX_MB`，校验 sha256/长度；
