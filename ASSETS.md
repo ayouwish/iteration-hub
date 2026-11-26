@@ -122,12 +122,34 @@ pm asset url --id <sha256>
 
 SMB 只是 fs 后端的局域网入口；HTTP API 才是通用能力。
 
-## CDN / 对象存储
+## CDN / S3 / MinIO / R2
 
-- 把 `ASSET_BASE_URL` 指向 Nginx/Caddy/R2 公共域名，API 返回的 `url` 自动变成 CDN 地址；
-- 内容寻址 + 长缓存：`Cache-Control: public, max-age=31536000, immutable`；
-- 后续加 `ASSET_STORE=s3`（MinIO/R2），roadmap 和客户端不变；
-- 私有资源用签名 URL（后续阶段）。
+`ASSET_STORE=s3` 时，对象存储与 roadmap manifest 解耦，manifest 结构不变（只多一个 `"store": "s3"`）。
+
+`deploy/.env`：
+
+```ini
+ASSET_STORE=s3
+ASSET_S3_BUCKET=pm-assets
+ASSET_S3_REGION=us-east-1
+# MinIO / R2 自定义端点；AWS 留空
+ASSET_S3_ENDPOINT=
+ASSET_S3_PREFIX=
+ASSET_S3_ACCESS_KEY=
+ASSET_S3_SECRET_KEY=
+
+# 公共 CDN；没有 CDN 时用签名 URL
+ASSET_BASE_URL=https://cdn.example.com/assets
+ASSET_SIGNED_URLS=0
+ASSET_SIGNED_TTL=3600
+```
+
+- 容器需要 `boto3`：`docker build --build-arg INSTALL_S3=1 ...`（见 Dockerfile）或在本机 `pip install boto3`；
+- 上传 key 为 `<prefix>/<sha256>`，天然内容寻址，重复内容 `head_object` 命中后直接复用；
+- 有 `ASSET_BASE_URL` 时，API 返回 CDN URL；私有桶设置 `ASSET_SIGNED_URLS=1`，API 返回带 `ASSET_SIGNED_TTL` 的签名 URL；
+- `GET/HEAD /api/assets/<id>` 对 s3 返回 `302` 到 CDN/签名 URL，下载行为与 fs 一致；
+- `pm asset check` 对 s3 使用 `head_object` 校验对象存在。
+
 
 ## 校验
 

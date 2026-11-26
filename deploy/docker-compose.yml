@@ -3,6 +3,8 @@ services:
     build:
       context: ..
       dockerfile: Dockerfile
+      args:
+        INSTALL_S3: "${INSTALL_S3:-0}"
     image: iteration-hub-pm:latest
     container_name: pm
     restart: unless-stopped
@@ -23,11 +25,20 @@ services:
       ASSET_DIR: /assets
       ASSET_BASE_URL: "${ASSET_BASE_URL:-}"
       ASSET_MAX_MB: "${ASSET_MAX_MB:-50}"
+      ASSET_STORE: "${ASSET_STORE:-fs}"
+      ASSET_S3_BUCKET: "${ASSET_S3_BUCKET:-}"
+      ASSET_S3_ENDPOINT: "${ASSET_S3_ENDPOINT:-}"
+      ASSET_S3_REGION: "${ASSET_S3_REGION:-us-east-1}"
+      ASSET_S3_PREFIX: "${ASSET_S3_PREFIX:-}"
+      ASSET_S3_ACCESS_KEY: "${ASSET_S3_ACCESS_KEY:-}"
+      ASSET_S3_SECRET_KEY: "${ASSET_S3_SECRET_KEY:-}"
+      ASSET_SIGNED_URLS: "${ASSET_SIGNED_URLS:-0}"
+      ASSET_SIGNED_TTL: "${ASSET_SIGNED_TTL:-3600}"
       HOME: /tmp
     volumes:
       # iteration-hub 是服务仓；这里挂载的是你的 roadmap 数据仓
       - "${ROADMAP:?set ROADMAP in deploy/.env}:/data"
       # pm-wish 的 deploy key 目录（含 id_ed25519 + known_hosts），只读挂载
       - "${PM_SSH_DIR:?set PM_SSH_DIR in deploy/.env}:/ssh:ro"
-      # 多媒体/大文件共享目录（SMB 共享，不进 git）
-      - "${ASSETS_DIR:?set ASSETS_DIR in deploy/.env}:/assets"
+      # 多媒体/大文件共享目录（SMB 共享，不进 git）；s3 模式可留默认占位
+      - "${ASSETS_DIR:-./pm-assets}:/assets"

@@ -2870,7 +2870,7 @@ def cmd_asset(a):
             entry, path = find_asset(row.get("sha256") or row.get("id") or "")
             if entry is None:
                 problems.append(f"缺失: {row.get('sha256') or row.get('id')} {row.get('name')}")
-            elif path.stat().st_size != row.get("size"):
+            elif path is not None and path.stat().st_size != row.get("size"):
                 problems.append(f"大小不符: {row.get('sha256')} {row.get('name')}")
         for x in problems:
             print(f"! {x}")
@@ -3600,7 +3600,74 @@ def asset_ext(name: str) -> str:
     return suffix if re.match(r"^\.[a-z0-9]{1,8}$", suffix) else ""
 
 
+def asset_provider() -> str:
+    env = (os.environ.get("ASSET_STORE") or "").strip().lower()
+    if env:
+        return env
+    try:
+        return str(load_assets().get("store") or "fs").lower()
+    except Exception:
+        return "fs"
+
+
+def s3_config() -> dict:
+    bucket = (os.environ.get("ASSET_S3_BUCKET") or "").strip()
+    if not bucket:
+        die("ASSET_STORE=s3 需要 ASSET_S3_BUCKET")
+    cfg = {
+        "bucket": bucket,
+        "endpoint": (os.environ.get("ASSET_S3_ENDPOINT") or "").strip() or None,
+        "region": (os.environ.get("ASSET_S3_REGION") or "us-east-1").strip(),
+        "prefix": (os.environ.get("ASSET_S3_PREFIX") or "").strip().strip("/"),
+        "access": (os.environ.get("ASSET_S3_ACCESS_KEY")
+                   or os.environ.get("AWS_ACCESS_KEY_ID") or "").strip(),
+        "secret": (os.environ.get("ASSET_S3_SECRET_KEY")
+                   or os.environ.get("AWS_SECRET_ACCESS_KEY") or "").strip(),
+        "signed": (os.environ.get("ASSET_SIGNED_URLS") or "").strip().lower()
+                  in ("1", "true", "yes", "on"),
+        "ttl": int(os.environ.get("ASSET_SIGNED_TTL") or "3600"),
+    }
+    if not cfg["signed"] and not asset_base_url():
+        die("ASSET_STORE=s3 需要 ASSET_BASE_URL（CDN）或 ASSET_SIGNED_URLS=1")
+    return cfg
+
+
+def s3_client():
+    try:
+        import boto3
+    except ImportError:
+        die("ASSET_STORE=s3 需要 boto3：pip install boto3")
+    cfg = s3_config()
+    kwargs = {"region_name": cfg["region"]}
+    if cfg["endpoint"]:
+        kwargs["endpoint_url"] = cfg["endpoint"]
+    if cfg["access"] and cfg["secret"]:
+        kwargs["aws_access_key_id"] = cfg["access"]
+        kwargs["aws_secret_access_key"] = cfg["secret"]
+    return boto3.client("s3", **kwargs)
+
+
+def s3_key(asset_id: str) -> str:
+    prefix = s3_config()["prefix"]
+    return f"{prefix}/{asset_id}" if prefix else asset_id
+
+
+def s3_signed_url(asset_id: str) -> str:
+    cfg = s3_config()
+    if not cfg["signed"]:
+        return ""
+    client = s3_client()
+    return client.generate_presigned_url(
+        "get_object",
+        Params={"Bucket": cfg["bucket"], "Key": s3_key(asset_id)},
+        ExpiresIn=max(60, cfg["ttl"]))
+
+
 def asset_url(asset_id: str) -> str:
+    if asset_provider() == "s3":
+        signed = s3_signed_url(asset_id)
+        if signed:
+            return signed
     base = asset_base_url()
     return f"{base}/{asset_id}" if base else f"/api/assets/{asset_id}"
 
@@ -3623,11 +3690,24 @@ def store_asset(feature, name, data: bytes, mime: str, session: str = "") -> dic
     mime = normalize_asset_mime(mime, name)
     sha = hashlib.sha256(data).hexdigest()
     ext = asset_ext(name)
-    path = asset_store_path(sha, ext)
-    path.parent.mkdir(parents=True, exist_ok=True)
-    if not path.exists():
-        path.write_bytes(data)
+    provider = asset_provider()
+    if provider == "s3":
+        cfg = s3_config()
+        client = s3_client()
+        key = s3_key(sha)
+        try:
+            client.head_object(Bucket=cfg["bucket"], Key=key)
+        except Exception:
+            client.put_object(Bucket=cfg["bucket"], Key=key, Body=data,
+                              ContentType=mime or "application/octet-stream",
+                              CacheControl="public, max-age=31536000, immutable")
+    else:
+        path = asset_store_path(sha, ext)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        if not path.exists():
+            path.write_bytes(data)
     doc = load_assets()
+    doc["store"] = provider
     files = doc.setdefault("files", [])
     entry = next((x for x in files if x.get("sha256") == sha), None)
     if entry is None:
@@ -3653,8 +3733,18 @@ def store_asset(feature, name, data: bytes, mime: str, session: str = "") -> dic
 
 def find_asset(asset_id: str):
     doc = load_assets()
+    provider = asset_provider()
     for entry in doc.get("files", []):
         if entry.get("sha256") == asset_id or entry.get("id") == asset_id:
+            if provider == "s3":
+                try:
+                    cfg = s3_config()
+                    s3_client().head_object(Bucket=cfg["bucket"], Key=s3_key(asset_id))
+                    return entry, None
+                except SystemExit:
+                    return None, None
+                except Exception:
+                    return None, None
             ext = asset_ext(entry.get("name", ""))
             path = asset_store_path(asset_id, ext)
             if path.exists():
@@ -3775,6 +3865,37 @@ class HubHandler(BaseHTTPRequestHandler):
                                 self._asset_session())
         self._json(200, {"ok": True, **entry})
 
+    def _serve_asset(self, asset_id: str, head: bool = False):
+        with self.lock:
+            use_project(self._project())
+            entry, file_path = find_asset(asset_id)
+        if entry is None:
+            return self._json(404, {"ok": False, "error": "资产不存在"})
+        if file_path is None:
+            url = asset_url(asset_id)
+            if not url.startswith("http"):
+                return self._json(503, {"ok": False, "error": "s3 资产需要 ASSET_BASE_URL 或 ASSET_SIGNED_URLS=1"})
+            self.send_response(302)
+            self.send_header("Location", url)
+            self.send_header("Content-Length", "0")
+            self.end_headers()
+            return
+        mime = entry.get("mime") or "application/octet-stream"
+        size = file_path.stat().st_size
+        if head:
+            self.send_response(200)
+            self.send_header("Content-Type", mime)
+            self.send_header("Content-Length", str(size))
+            self.send_header("Cache-Control", "public, max-age=31536000, immutable")
+            self.end_headers()
+            return
+        self.send_response(200)
+        self.send_header("Content-Type", mime)
+        self.send_header("Content-Length", str(size))
+        self.send_header("Cache-Control", "public, max-age=31536000, immutable")
+        self.end_headers()
+        self.wfile.write(file_path.read_bytes())
+
     def _project_add(self, body):
         pid = str(body.get("id") or "").strip()
         if not pid:
@@ -3872,15 +3993,7 @@ class HubHandler(BaseHTTPRequestHandler):
                         rows = list_assets(feature)
                     self._json(200, {"ok": True, "assets": rows})
                 elif path.startswith("/api/assets/"):
-                    asset_id = path.rsplit("/", 1)[-1]
-                    with self.lock:
-                        use_project(self._project())
-                        entry, file_path = find_asset(asset_id)
-                    if entry is None:
-                        self._json(404, {"ok": False, "error": "资产不存在"})
-                    else:
-                        self._send(200, file_path.read_bytes(),
-                                   entry.get("mime") or "application/octet-stream")
+                    self._serve_asset(path.rsplit("/", 1)[-1])
                 elif path == "/api/state":
                     with self.lock:
                         use_project(self._project())
@@ -3912,16 +4025,7 @@ class HubHandler(BaseHTTPRequestHandler):
             return self._json(404, {"ok": False, "error": "not found"})
         if not self._auth_ok():
             return self._json(401, {"ok": False, "error": "未授权"})
-        asset_id = path.rsplit("/", 1)[-1]
-        with self.lock:
-            use_project(self._project())
-            entry, file_path = find_asset(asset_id)
-        if entry is None:
-            return self._json(404, {"ok": False, "error": "资产不存在"})
-        self.send_response(200)
-        self.send_header("Content-Type", entry.get("mime") or "application/octet-stream")
-        self.send_header("Content-Length", str(file_path.stat().st_size))
-        self.end_headers()
+        self._serve_asset(path.rsplit("/", 1)[-1], head=True)
 
     def do_POST(self):
         path = self.path.split("?")[0]

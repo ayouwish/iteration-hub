@@ -1,6 +1,8 @@
 FROM python:3.12-alpine
 
+ARG INSTALL_S3=0
 RUN apk add --no-cache git openssh-client ca-certificates su-exec
+RUN if [ "$INSTALL_S3" = "1" ]; then pip install --no-cache-dir boto3; fi
 RUN git config --system --add safe.directory /data
 
 WORKDIR /app
